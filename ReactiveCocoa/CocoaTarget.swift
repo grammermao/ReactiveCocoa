@@ -7,7 +7,7 @@ internal final class CocoaTarget<Value>: NSObject {
 	private enum State {
 		case idle
 		case sending
-		case invokeAfterSending
+		case replayAfterSending([Value])
 	}
 
 	private let observer: Observer<Value, NoError>
@@ -24,8 +24,7 @@ internal final class CocoaTarget<Value>: NSObject {
 	/// Broadcast the action message to all observers.
 	///
 	/// Reentrancy is supported, and the action message would be deferred until the
-	/// delivery of the current message has completed. Deferred messages would be
-	/// coalesced.
+	/// delivery of the current message has completed.
 	///
 	/// - note: It should only be invoked on the main queue.
 	///
@@ -37,18 +36,23 @@ internal final class CocoaTarget<Value>: NSObject {
 			state = .sending
 			observer.send(value: transform(sender))
 
-			while state == .invokeAfterSending {
-				state = .sending
-				observer.send(value: transform(sender))
+			while case let .replayAfterSending(values) = state {
+				if values.count == 1 {
+					state = .sending
+				} else {
+					state = .replayAfterSending(Array(values.dropFirst()))
+				}
+
+				observer.send(value: values[0])
 			}
 
 			state = .idle
 
 		case .sending:
-			state = .invokeAfterSending
+			state = .replayAfterSending([transform(sender)])
 
-		case .invokeAfterSending:
-			break
+		case let .replayAfterSending(values):
+			state = .replayAfterSending(values + [transform(sender)])
 		}
 	}
 }
